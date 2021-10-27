@@ -1,0 +1,6 @@
+# dependencies moved to setup.py
+
+# requirements.txt is only used for development, so this will
+# installs dependencies from ./setup.py, and the package itself,
+# in editable mode
+-e .

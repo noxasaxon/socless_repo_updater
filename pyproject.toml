@@ -1,0 +1,41 @@
+# https://snarky.ca/what-the-heck-is-pyproject-toml/
+[build-system]
+requires = [
+    "setuptools >= 40.9.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# addopts = '--cov=src'
+addopts = "--cov=socless_repo_parser --ignore=tests/mock_files/mock_socless_repo"
+testpaths = ["tests"]
+
+
+[tool.coverage.run] # https://coverage.readthedocs.io/en/latest/config.html
+branch = true
+
+[tool.coverage.report]
+show_missing= true
+
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = py38
+isolated_build = True
+
+[testenv]
+commands =
+    pytest -vv {posargs}
+    
+setenv =
+    PIP_INDEX_URL = {env:PIP_INDEX_URL:https://pypi.org/simple/}
+
+deps =	
+    pytest
+    pytest-cov
+    python-dotenv
+    # coverage[toml]
+    -r{toxinidir}/requirements.txt
+"""
