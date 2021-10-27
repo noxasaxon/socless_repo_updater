@@ -7,9 +7,21 @@ from github.Repository import Repository
 from socless_repo_parser import SoclessGithubWrapper
 from socless_repo_parser.helpers import parse_repo_names, get_github_domain
 from file_types.requirements_txt import validate_socless_python_release
-from socless_repo_updater.constants import PACKAGE_JSON
+from socless_repo_updater.constants import (
+    PACKAGE_JSON,
+    REQUIREMENTS_FULL_PATH,
+    SERVERLESS_YML,
+)
 from socless_repo_updater.exceptions import UpdaterError, VersionUpdateException
 from socless_repo_updater.file_types.package_json import update_package_json_contents
+from socless_repo_updater.file_types.requirements_txt import (
+    requirements_txt_are_equal,
+    update_socless_python_in_requirements_txt,
+)
+from socless_repo_updater.file_types.serverless_yml import (
+    update_serverless_yml_content,
+    yaml_files_are_equal,
+)
 from socless_repo_updater.utils import (
     commit_file_with_pr,
     make_branch_name,
@@ -64,17 +76,13 @@ class GithubUpdater:
 
             if as_json == new_package_json:
                 ## continue to next file update type
-                print("No changes made, dependencies are current.")
+                print("No changes made, package.json dependencies are current.")
             else:
                 ## file has changed, commit changes & update PR
                 new_content = json.dumps(new_package_json, indent=4)
-                pr = commit_file_with_pr(
-                    self.gh_repo,
+                pr = self._commit_file_helper(
                     gh_file_object,
                     new_content,
-                    PACKAGE_JSON,
-                    self.head_branch,
-                    self.default_branch,
                     commit_message="updating versions for: "
                     + " ".join(new_package_json["dependencies"].keys()),
                 )
@@ -84,37 +92,45 @@ class GithubUpdater:
         if sls_yml_changes:
             ## update serverless.yml
 
-            # sls_result = update_serverless_yml(
-            #     repo=name,
-            #     update_data={},
-            #     replace_only=True,
-            #     org=org,
-            #     main_branch=main_branch,
-            #     head_branch=branch_name,
-            #     ghe=ghe,
-            # )
-            # if sls_result.pull_request:
-            #     prs.append(sls_result.pull_request)
-            pass
+            gh_file_object = self.get_github_file(SERVERLESS_YML, self.head_branch)
+
+            new_content = update_serverless_yml_content(
+                gh_file_object.decoded_content, sls_yml_changes
+            )
+
+            if yaml_files_are_equal(gh_file_object.decoded_content, new_content):
+                print("No changes made, serverless.yml files are the same.")
+            else:
+                pr = self._commit_file_helper(
+                    gh_file_object,
+                    new_content,
+                    commit_message=f"updating serverless.yml with: {json.dumps(sls_yml_changes)}",
+                )
+                # save pr for metrics analysis
+                all_prs.append(pr)
 
         if socless_python_version:
             ## update socless_python (requirements.txt)
+            gh_file_object = self.get_github_file(
+                REQUIREMENTS_FULL_PATH, self.head_branch
+            )
 
-            # try:
-            #     socless_python_result = bump_socless_python(
-            #         repo=name,
-            #         release=socless_python_version,
-            #         org=org,
-            #         bypass_release_validation=True,
-            #         main_branch=main_branch,
-            #         head_branch=branch_name,
-            #         ghe=ghe,
-            #     )
-            #     if socless_python_result.pull_request:
-            #         prs.append(socless_python_result.pull_request)
-            # except FileNotFoundError:
-            #     continue
-            pass
+            new_requirements = update_socless_python_in_requirements_txt(
+                gh_file_object.decoded_content, socless_python_version
+            )
+
+            if requirements_txt_are_equal(
+                gh_file_object.decoded_content, new_requirements
+            ):
+                print("No changes made, requirements.txt files are the same.")
+            else:
+                pr = self._commit_file_helper(
+                    gh_file_object,
+                    new_requirements,
+                    commit_message=f"updating serverless.yml with: {json.dumps(sls_yml_changes)}",
+                )
+                # save pr for metrics analysis
+                all_prs.append(pr)
 
         ## check if all update commits went to same PR
         # pr_nums = [x.number for x in prs if isinstance(x, PullRequest)]
@@ -135,8 +151,19 @@ class GithubUpdater:
     #     print(x["pr"].url)
     # return {"all_results": results, "skipped": skipped, "updated": updated}
 
-    def _fetch_and_parse_package_json_from_github(self, gh_repo: Repository):
-        pass
+    def _commit_file_helper(
+        self, gh_file_object: ContentFile, new_content: str, commit_message: str
+    ) -> PullRequest:
+        pr = commit_file_with_pr(
+            self.gh_repo,
+            gh_file_object,
+            new_content,
+            gh_file_object.path,
+            self.head_branch,
+            self.default_branch,
+            commit_message,
+        )
+        return pr
 
 
 class SoclessUpdater(SoclessGithubWrapper):
@@ -172,13 +199,11 @@ class SoclessUpdater(SoclessGithubWrapper):
 
             gh_repo = gh.get_repo(repo_meta.get_full_name())
 
-            GithubUpdater().update_in_github(
-                gh_repo,
+            GithubUpdater(gh_repo, head_branch).update_in_github(
                 pj_deps,
                 pj_replace_only,
                 sls_yml_changes,
                 socless_python_version,
-                head_branch,
             )
 
         #     integration_family = IntegrationFamilyBuilder().build_from_github(gh_repo)

@@ -1,4 +1,5 @@
 import json, base64
+from typing import Union
 from src.constants import REQUIREMENTS_FULL_PATH, SOCLESS_PYTHON_PIP_PATTERN
 from src.exceptions import VersionUpdateException
 from src.gh_helpers import (
@@ -33,6 +34,28 @@ def validate_socless_python_release(release_tag_or_latest: str) -> str:
         )
 
     return release_tag_or_latest
+
+
+def update_socless_python_in_requirements_txt(
+    requirements_txt: Union[str, bytes], release: str
+) -> str:
+    if isinstance(requirements_txt, bytes):
+        requirements_txt = requirements_txt.decode("UTF-8")
+
+    file_with_new_release = re.sub(
+        SOCLESS_PYTHON_PIP_PATTERN,
+        build_replacement_pip_string(release),
+        requirements_txt,
+    )
+    return file_with_new_release
+
+
+def requirements_txt_are_equal(first: Union[str, bytes], second: Union[str, bytes]):
+    if isinstance(first, bytes):
+        first = first.decode("UTF-8")
+    if isinstance(second, bytes):
+        second = second.decode("UTF-8")
+    return first == second
 
 
 def bump_socless_python(
