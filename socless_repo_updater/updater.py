@@ -1,7 +1,8 @@
 import json
-from typing import List, Optional, Union
+from typing import List, Union
 from github import GithubException
 from github.ContentFile import ContentFile
+from github.PullRequest import PullRequest
 from github.Repository import Repository
 from socless_repo_parser import SoclessGithubWrapper
 from socless_repo_parser.helpers import parse_repo_names, get_github_domain
@@ -9,70 +10,76 @@ from file_types.requirements_txt import validate_socless_python_release
 from socless_repo_updater.constants import PACKAGE_JSON
 from socless_repo_updater.exceptions import UpdaterError, VersionUpdateException
 from socless_repo_updater.file_types.package_json import update_package_json_contents
-from socless_repo_updater.utils import check_github_file_exists, make_branch_name
+from socless_repo_updater.utils import (
+    commit_file_with_pr,
+    make_branch_name,
+)
 
 
-class RepoUpdater:
-    def get_github_file(
-        self, gh_repo: Repository, file_path, branch_name
-    ) -> ContentFile:
-        file_contents = gh_repo.get_contents(path=file_path, ref=branch_name)
+class GithubUpdater:
+    def __init__(self, gh_repo: Repository, head_branch: str = "") -> None:
+        self.gh_repo = gh_repo
+        self.head_branch = head_branch or make_branch_name()
+        self.default_branch = self.gh_repo.default_branch
+
+    def get_github_file(self, file_path, branch_name) -> ContentFile:
+        file_contents = self.gh_repo.get_contents(path=file_path, ref=branch_name)
         if isinstance(file_contents, list):
             raise UpdaterError(
                 f"File path {file_path} branch: {branch_name} points to a directory"
             )
         return file_contents
 
+    def _create_head_branch_if_nonexistent(self):
+        try:
+            _ = self.gh_repo.get_branch(self.head_branch)
+        except GithubException as e:
+            print(e)
+            print(
+                f"Branch {self.head_branch} does not exist on {self.gh_repo.name}. Creating.."
+            )
+            gh_source = self.gh_repo.get_branch(self.default_branch)
+            self.gh_repo.create_git_ref(
+                ref="refs/heads/" + self.head_branch, sha=gh_source.commit.sha
+            )
+
     def update_in_github(
         self,
-        gh_repo: Repository,
         pj_deps: dict = None,
         pj_replace_only: bool = True,
         sls_yml_changes: dict = None,
         socless_python_version: str = "",
-        head_branch="",
     ):
-        head_branch = head_branch or make_branch_name()
-        default_branch = gh_repo.default_branch
+        self._create_head_branch_if_nonexistent()
 
-        # check head_branch exists. if not, create new branch from default branch
-        try:
-            branch_query = gh_repo.get_branch(head_branch)
-        except GithubException as e:
-            print(e)
-            print(f"Branch {head_branch} does not exist on {gh_repo.name}. Creating..")
-            gh_source = gh_repo.get_branch(default_branch)
-            gh_repo.create_git_ref(
-                ref="refs/heads/" + head_branch, sha=gh_source.commit.sha
-            )
-
-        prs = []
+        all_prs: List[PullRequest] = []
         if pj_deps:
             ## update package.json
-
-            # file_check = check_github_file_exists(
-            #     gh_repo, file_path=PACKAGE_JSON, branch_name=head_branch
-            # )
-
-            # ????? TODO
-            file_contents = self.get_github_file(gh_repo, PACKAGE_JSON, head_branch)
-            as_json = json.loads(file_contents.decoded_content)
+            # ????? TODOoooo
+            gh_file_object = self.get_github_file(PACKAGE_JSON, self.head_branch)
+            as_json = json.loads(gh_file_object.decoded_content)
             new_package_json = update_package_json_contents(
                 as_json, pj_deps, pj_replace_only
             )
 
-            # pj_result = update_package_json(
-            #     repo=name,
-            #     updated_dependencies=pj_deps,
-            #     replace_only=pj_replace_only,
-            #     org=org,
-            #     main_branch=main_branch,
-            #     head_branch=branch_name,
-            #     ghe=ghe,
-            # )
-            # if pj_result.pull_request:
-            #     prs.append(pj_result.pull_request)
-            pass
+            if as_json == new_package_json:
+                ## continue to next file update type
+                print("No changes made, dependencies are current.")
+            else:
+                ## file has changed, commit changes & update PR
+                new_content = json.dumps(new_package_json, indent=4)
+                pr = commit_file_with_pr(
+                    self.gh_repo,
+                    gh_file_object,
+                    new_content,
+                    PACKAGE_JSON,
+                    self.head_branch,
+                    self.default_branch,
+                    commit_message="updating versions for: "
+                    + " ".join(new_package_json["dependencies"].keys()),
+                )
+                # save pr for metrics analysis
+                all_prs.append(pr)
 
         if sls_yml_changes:
             ## update serverless.yml
@@ -165,7 +172,7 @@ class SoclessUpdater(SoclessGithubWrapper):
 
             gh_repo = gh.get_repo(repo_meta.get_full_name())
 
-            RepoUpdater().update_in_github(
+            GithubUpdater().update_in_github(
                 gh_repo,
                 pj_deps,
                 pj_replace_only,

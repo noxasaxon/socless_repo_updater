@@ -72,11 +72,44 @@ def check_pr_exists(
     gh_repo: Repository,
     base_branch: str,
     head_branch: str,
-) -> Union[bool, PullRequest]:
+) -> Optional[PullRequest]:
     for pull in gh_repo.get_pulls(state="open", sort="created", base=base_branch):
         if (
             pull.raw_data["base"]["ref"] == base_branch
             and pull.raw_data["head"]["ref"] == head_branch
         ):
             return pull
-    return False
+    return None
+
+
+def commit_file_with_pr(
+    gh_repo: Repository,
+    gh_file_object: ContentFile,
+    new_content: str,
+    file_path: str,
+    head_branch: str,
+    default_branch: str,
+    commit_message: str,
+) -> PullRequest:
+    _ = gh_repo.update_file(
+        path=file_path,
+        message=commit_message,
+        content=new_content,
+        sha=gh_file_object.sha,
+        branch=head_branch,
+    )
+
+    existing_pr = check_pr_exists(
+        gh_repo=gh_repo, base_branch=default_branch, head_branch=head_branch
+    )
+    if existing_pr:
+        print(f"PR already exists: {existing_pr.number}")
+        return existing_pr
+    else:
+        new_pr = gh_repo.create_pull(
+            title="CLI- dependency version bump",
+            body="updating dependencies, please check changed files",
+            base=default_branch,
+            head=head_branch,
+        )
+        return new_pr
