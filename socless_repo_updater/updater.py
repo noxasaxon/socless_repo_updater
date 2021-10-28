@@ -6,7 +6,6 @@ from github.PullRequest import PullRequest
 from github.Repository import Repository
 from socless_repo_parser import SoclessGithubWrapper
 from socless_repo_parser.helpers import parse_repo_names, get_github_domain
-from file_types.requirements_txt import validate_socless_python_release
 from socless_repo_updater.constants import (
     PACKAGE_JSON,
     REQUIREMENTS_FULL_PATH,
@@ -33,6 +32,7 @@ class GithubUpdater:
         self.gh_repo = gh_repo
         self.head_branch = head_branch or make_branch_name()
         self.default_branch = self.gh_repo.default_branch
+        self.all_prs: List[PullRequest] = []
 
     def get_github_file(self, file_path, branch_name) -> ContentFile:
         file_contents = self.gh_repo.get_contents(path=file_path, ref=branch_name)
@@ -64,73 +64,16 @@ class GithubUpdater:
     ):
         self._create_head_branch_if_nonexistent()
 
-        all_prs: List[PullRequest] = []
         if pj_deps:
             ## update package.json
-            # ????? TODOoooo
-            gh_file_object = self.get_github_file(PACKAGE_JSON, self.head_branch)
-            as_json = json.loads(gh_file_object.decoded_content)
-            new_package_json = update_package_json_contents(
-                as_json, pj_deps, pj_replace_only
-            )
-
-            if as_json == new_package_json:
-                ## continue to next file update type
-                print("No changes made, package.json dependencies are current.")
-            else:
-                ## file has changed, commit changes & update PR
-                new_content = json.dumps(new_package_json, indent=4)
-                pr = self._commit_file_helper(
-                    gh_file_object,
-                    new_content,
-                    commit_message="updating versions for: "
-                    + " ".join(new_package_json["dependencies"].keys()),
-                )
-                # save pr for metrics analysis
-                all_prs.append(pr)
+            self._update_package_json(pj_deps, pj_replace_only)
 
         if sls_yml_changes:
             ## update serverless.yml
-
-            gh_file_object = self.get_github_file(SERVERLESS_YML, self.head_branch)
-
-            new_content = update_serverless_yml_content(
-                gh_file_object.decoded_content, sls_yml_changes
-            )
-
-            if yaml_files_are_equal(gh_file_object.decoded_content, new_content):
-                print("No changes made, serverless.yml files are the same.")
-            else:
-                pr = self._commit_file_helper(
-                    gh_file_object,
-                    new_content,
-                    commit_message=f"updating serverless.yml with: {json.dumps(sls_yml_changes)}",
-                )
-                # save pr for metrics analysis
-                all_prs.append(pr)
+            self._update_serverless_yml(sls_yml_changes)
 
         if socless_python_version:
-            ## update socless_python (requirements.txt)
-            gh_file_object = self.get_github_file(
-                REQUIREMENTS_FULL_PATH, self.head_branch
-            )
-
-            new_requirements = update_socless_python_in_requirements_txt(
-                gh_file_object.decoded_content, socless_python_version
-            )
-
-            if requirements_txt_are_equal(
-                gh_file_object.decoded_content, new_requirements
-            ):
-                print("No changes made, requirements.txt files are the same.")
-            else:
-                pr = self._commit_file_helper(
-                    gh_file_object,
-                    new_requirements,
-                    commit_message=f"updating serverless.yml with: {json.dumps(sls_yml_changes)}",
-                )
-                # save pr for metrics analysis
-                all_prs.append(pr)
+            self._update_socless_python_version(socless_python_version)
 
         ## check if all update commits went to same PR
         # pr_nums = [x.number for x in prs if isinstance(x, PullRequest)]
@@ -150,6 +93,63 @@ class GithubUpdater:
     # for x in updated:
     #     print(x["pr"].url)
     # return {"all_results": results, "skipped": skipped, "updated": updated}
+
+    def _update_package_json(self, pj_deps, pj_replace_only):
+        gh_file_object = self.get_github_file(PACKAGE_JSON, self.head_branch)
+        as_json = json.loads(gh_file_object.decoded_content)
+        new_package_json = update_package_json_contents(
+            as_json, pj_deps, pj_replace_only
+        )
+
+        if as_json == new_package_json:
+            print("No changes made, package.json dependencies are current.")
+        else:
+            ## file has changed, commit changes & update PR
+            new_content = json.dumps(new_package_json, indent=4)
+            pr = self._commit_file_helper(
+                gh_file_object,
+                new_content,
+                commit_message="updating versions for: "
+                + " ".join(new_package_json["dependencies"].keys()),
+            )
+            # save pr for metrics analysis
+            self.all_prs.append(pr)
+
+    def _update_serverless_yml(self, sls_yml_changes: dict):
+        gh_file_object = self.get_github_file(SERVERLESS_YML, self.head_branch)
+
+        new_content = update_serverless_yml_content(
+            gh_file_object.decoded_content, sls_yml_changes
+        )
+
+        if yaml_files_are_equal(gh_file_object.decoded_content, new_content):
+            print("No changes made, serverless.yml files are the same.")
+        else:
+            pr = self._commit_file_helper(
+                gh_file_object,
+                new_content,
+                commit_message=f"updating serverless.yml with: {json.dumps(sls_yml_changes)}",
+            )
+            # save pr for metrics analysis
+            self.all_prs.append(pr)
+
+    def _update_socless_python_version(self, socless_python_version: str):
+        gh_file_object = self.get_github_file(REQUIREMENTS_FULL_PATH, self.head_branch)
+
+        new_requirements = update_socless_python_in_requirements_txt(
+            gh_file_object.decoded_content, socless_python_version
+        )
+
+        if requirements_txt_are_equal(gh_file_object.decoded_content, new_requirements):
+            print("No changes made, requirements.txt files are the same.")
+        else:
+            pr = self._commit_file_helper(
+                gh_file_object,
+                new_requirements,
+                commit_message=f"updating requirements.txt to socless_python v{socless_python_version}",
+            )
+            # save pr for metrics analysis
+            self.all_prs.append(pr)
 
     def _commit_file_helper(
         self, gh_file_object: ContentFile, new_content: str, commit_message: str
@@ -184,10 +184,10 @@ class SoclessUpdater(SoclessGithubWrapper):
         ghe_domain = get_github_domain(self.github_enterprise)  # type: ignore
 
         # validate args to update TODO
-        if socless_python_version:
-            socless_python_version = validate_socless_python_release(
-                socless_python_version
-            )
+        # if socless_python_version:
+        #     socless_python_version = validate_socless_python_release(
+        #         socless_python_version
+        #     )
 
         # update each repo
         for repo_meta in parse_repo_names(cli_repo_input=repo_list):

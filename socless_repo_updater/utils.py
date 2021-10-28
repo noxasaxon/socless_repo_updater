@@ -128,7 +128,7 @@ def dict_merge(*args, add_keys=True):
         for k, v in merge_dct.items():
             if not rtn_dct.get(k):
                 rtn_dct[k] = v
-            elif k in rtn_dct and type(v) != type(rtn_dct[k]):
+            elif k in rtn_dct and type(v) != type(rtn_dct[k]):  # noqa
                 raise TypeError(
                     f"Overlapping keys exist with different types: original is {type(rtn_dct[k])}, new value is {type(v)}"
                 )
@@ -143,3 +143,17 @@ def dict_merge(*args, add_keys=True):
             else:
                 rtn_dct[k] = v
     return rtn_dct
+
+
+# def check_release_exists(repo: str, org: str, release: str, ghe=False):
+#     g = init_github(ghe=ghe)
+#     gh_repo = g.get_repo(full_name_or_id=f"{org}/{repo}")
+
+#     try:
+#         release_query = gh_repo.get_release(release)
+#         # release_query.tag_name is 1.1.0
+#         return release_query
+#     except GithubException as e:
+#         print(f"Release {release} not found for {org}/{repo}")
+#         print(e)
+#         return False
