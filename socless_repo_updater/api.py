@@ -5,3 +5,5 @@ from socless_repo_parser import (  # noqa
     parse_repo_names,  # noqa
     get_github_domain,  # noqa
 )
+
+from socless_repo_updater.updater import SoclessUpdater  # noqa
