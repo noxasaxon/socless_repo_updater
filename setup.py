@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 setup(
@@ -8,7 +8,7 @@ setup(
     url="https://github.com/noxasaxon/socless_repo_updater",
     author="Saxon Hunt",
     author_email="saxon.h@outlook.com",
-    packages=["socless_repo_updater"],
+    packages=find_packages(),
     install_requires=[
         "pydantic",
         "socless_repo_parser @ git+https://github.com/twilio-labs/socless_repo_parser.git#egg=socless_repo_parser",
