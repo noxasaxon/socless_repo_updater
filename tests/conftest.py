@@ -1,5 +1,3 @@
-import json
-from typing import List
 import pytest
 from dotenv import load_dotenv
 
@@ -13,11 +11,17 @@ def load_dotenv_if_exists():
 
 
 def get_mock_file(file_name: str) -> str:
-
     file_path = f"{MOCK_DIR_PATH}{file_name}"
     with open(file_path) as f:
         python_file_as_string = f.read()
     return python_file_as_string
+
+
+def get_file_from_mock_repo(file_path: str) -> str:
+    file_path = f"{PATH_TO_LOCAL_MOCK_REPO}/{file_path}"
+    with open(file_path) as f:
+        file_as_string = f.read()
+    return file_as_string
 
 
 def pytest_addoption(parser):
