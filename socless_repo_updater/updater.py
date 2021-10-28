@@ -47,9 +47,8 @@ class GithubUpdater:
         try:
             _ = self.gh_repo.get_branch(self.head_branch)
         except GithubException as e:
-            print(e)
             print(
-                f"Branch {self.head_branch} does not exist on {self.gh_repo.name}. Creating.."
+                f"Branch {self.head_branch} does not exist on {self.gh_repo.name}. Creating.. ({e})"
             )
             gh_source = self.gh_repo.get_branch(self.default_branch)
             self.gh_repo.create_git_ref(
@@ -99,7 +98,7 @@ class GithubUpdater:
             print("No changes made, package.json dependencies are current.")
         else:
             ## file has changed, commit changes & update PR
-            new_content = json.dumps(new_package_json, indent=4)
+            new_content = json.dumps(new_package_json, indent=2)
             pr = self._commit_file_helper(
                 gh_file_object,
                 new_content,
@@ -200,6 +199,54 @@ class SoclessUpdater(SoclessGithubWrapper):
                 gh = self.get_or_init_github_enterprise()
             else:
                 gh = self.get_or_init_github(required=True)
+
+            try:
+                gh_repo = gh.get_repo(repo_meta.get_full_name())
+
+                repo_updater = GithubUpdater(gh_repo, head_branch)
+                repo_updater.update_in_github(
+                    pj_deps,
+                    pj_replace_only,
+                    sls_yml_changes,
+                    socless_python_version,
+                )
+
+                # ensure that if no branch was provided, we use the newly created branch name
+                head_branch = repo_updater.head_branch
+                self.metrics_for_all_repos.append(repo_updater.report_pr_metrics())
+                self.prs_for_all_repos = self.prs_for_all_repos + repo_updater.all_prs
+            except Exception as e:
+                print(
+                    f"ERROR | skipping repo due to error during update of {repo_meta.name} - {e}."
+                )
+                self.errors.append((repo_meta, e))
+
+        self.report_all_metrics()
+
+    def update_with_regular_github(
+        self,
+        repo_list: Union[str, List[str]],
+        token: str = "",
+        pj_deps: dict = None,
+        pj_replace_only: bool = True,
+        sls_yml_changes: dict = None,
+        socless_python_version: str = "",
+        head_branch="",
+    ):
+        # TODO validate args to update _before_ starting the batch
+        # if socless_python_version:
+        #     socless_python_version = validate_socless_python_release(
+        #         socless_python_version
+        #     )
+
+        # update each repo
+
+        repos_metadata = parse_repo_names(cli_repo_input=repo_list)
+        repos_metadata.sort(key=lambda x: x.url)
+        self.all_repos = repos_metadata
+
+        for repo_meta in repos_metadata:
+            gh = self.get_or_init_github(token=token, required=True)
 
             try:
                 gh_repo = gh.get_repo(repo_meta.get_full_name())
