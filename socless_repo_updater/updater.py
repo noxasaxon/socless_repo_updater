@@ -1,11 +1,12 @@
 import json
-from typing import List, Union
+from typing import List, Tuple, Union
 from github import GithubException
 from github.ContentFile import ContentFile
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 from socless_repo_parser import SoclessGithubWrapper
 from socless_repo_parser.helpers import parse_repo_names, get_github_domain
+from socless_repo_parser.models import RepoMetadata
 from socless_repo_updater.constants import (
     PACKAGE_JSON,
     REQUIREMENTS_FULL_PATH,
@@ -75,24 +76,17 @@ class GithubUpdater:
         if socless_python_version:
             self._update_socless_python_version(socless_python_version)
 
+    def report_pr_metrics(self):
         ## check if all update commits went to same PR
-        # pr_nums = [x.number for x in prs if isinstance(x, PullRequest)]
-        # if len(set(pr_nums)) > 1:
-        #     print(f"DEBUG | PRs not the same- {name}: {prs}")
-        # if len(pr_nums) > 0:
-        #     results.append({"repo": name, "updated": True, "pr": prs[0]})
-        # else:
-        #     results.append({"repo": name, "updated": False, "pr": False})
-
-    # # report metrics
-    # skipped = [x for x in results if not x["updated"]]
-    # updated = [x for x in results if x["updated"]]
-    # print(f"INFO | Number of repos in batch: {len(results)}")
-    # print(f"INFO | Number of PRs opened: {len(updated)}")
-    # print(f"INFO | Number of repos skipped: {len(skipped)}")
-    # for x in updated:
-    #     print(x["pr"].url)
-    # return {"all_results": results, "skipped": skipped, "updated": updated}
+        pr_nums = [x.number for x in self.all_prs]
+        if len(set(pr_nums)) > 1:
+            print(
+                f"DEBUG | PRs not the same, issue with commit logic- {self.gh_repo.name}: {self.all_prs}"
+            )
+        if len(pr_nums) > 0:
+            return {"repo": self.gh_repo.name, "updated": True, "pr": self.all_prs[0]}
+        else:
+            return {"repo": self.gh_repo.name, "updated": False, "pr": False}
 
     def _update_package_json(self, pj_deps, pj_replace_only):
         gh_file_object = self.get_github_file(PACKAGE_JSON, self.head_branch)
@@ -167,6 +161,13 @@ class GithubUpdater:
 
 
 class SoclessUpdater(SoclessGithubWrapper):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prs_for_all_repos: List[PullRequest] = []
+        self.metrics_for_all_repos: List[dict] = []
+        self.errors: List[Tuple[RepoMetadata, Exception]] = []
+        self.all_repos: List[RepoMetadata] = []
+
     def update_with_github_enterprise(
         self,
         repo_list: Union[str, List[str]],
@@ -179,38 +180,49 @@ class SoclessUpdater(SoclessGithubWrapper):
         head_branch="",
     ):
         self.get_or_init_github_enterprise(token, domain)
-
-        # use private attributes to get the github enterprise domain
         ghe_domain = get_github_domain(self.github_enterprise)  # type: ignore
 
-        # validate args to update TODO
+        # TODO validate args to update _before_ starting the batch
         # if socless_python_version:
         #     socless_python_version = validate_socless_python_release(
         #         socless_python_version
         #     )
 
         # update each repo
-        for repo_meta in parse_repo_names(cli_repo_input=repo_list):
+
+        repos_metadata = parse_repo_names(cli_repo_input=repo_list)
+        repos_metadata.sort(key=lambda x: x.url)
+        self.all_repos = repos_metadata
+
+        for repo_meta in repos_metadata:
             # select correct github instance
             if ghe_domain in repo_meta.url:
                 gh = self.get_or_init_github_enterprise()
             else:
                 gh = self.get_or_init_github(required=True)
 
-            gh_repo = gh.get_repo(repo_meta.get_full_name())
+            try:
+                gh_repo = gh.get_repo(repo_meta.get_full_name())
 
-            GithubUpdater(gh_repo, head_branch).update_in_github(
-                pj_deps,
-                pj_replace_only,
-                sls_yml_changes,
-                socless_python_version,
-            )
+                repo_updater = GithubUpdater(gh_repo, head_branch)
+                repo_updater.update_in_github(
+                    pj_deps,
+                    pj_replace_only,
+                    sls_yml_changes,
+                    socless_python_version,
+                )
 
-        #     integration_family = IntegrationFamilyBuilder().build_from_github(gh_repo)
+                # ensure that if no branch was provided, we use the newly created branch name
+                head_branch = repo_updater.head_branch
+                self.metrics_for_all_repos.append(repo_updater.report_pr_metrics())
+                self.prs_for_all_repos = self.prs_for_all_repos + repo_updater.all_prs
+            except Exception as e:
+                print(
+                    f"ERROR | skipping repo due to error during update of {repo_meta.name} - {e}."
+                )
+                self.errors.append((repo_meta, e))
 
-        #     all_integrations.integrations.append(integration_family)
-
-        # return all_integrations
+        self.report_all_metrics()
 
     def validate_socless_python_release(self, release_tag_or_latest: str) -> str:
         if release_tag_or_latest == "latest":
@@ -233,3 +245,35 @@ class SoclessUpdater(SoclessGithubWrapper):
         #     )
 
         return release_tag_or_latest
+
+    def report_all_metrics(self):
+        # # report metrics
+        skipped = []
+        updated = []
+        for report in self.metrics_for_all_repos:
+            if report["updated"]:
+                updated.append(report)
+            else:
+                skipped.append(report)
+
+        print(f"INFO | Number of repos in batch: {len(self.metrics_for_all_repos)}")
+        print(f"INFO | Number of PRs opened: {len(updated)}")
+        print(f"INFO | Number of repos skipped: {len(skipped)}")
+
+        for report in updated:
+            print(report["pr"].url)
+
+        return {
+            "all_results": self.metrics_for_all_repos,
+            "skipped": skipped,
+            "updated": updated,
+        }
+
+    def report_all_errors(self, raise_errors=False):
+        for repo_meta, err in self.errors:
+            print(f"ERROR | {repo_meta.url} - {err}")
+
+        if raise_errors:
+            raise UpdaterError(
+                f"{len(self.errors)} found during update of {len(self.all_repos)} repos. read logs above ^"
+            )
