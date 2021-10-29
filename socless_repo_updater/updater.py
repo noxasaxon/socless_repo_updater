@@ -294,7 +294,7 @@ class SoclessUpdater(SoclessGithubWrapper):
         print(f"INFO | Number of repos skipped: {len(skipped)}")
 
         for report in updated:
-            print(report["pr"].url)
+            print(report["pr"].html_url)
 
         return {
             "all_results": self.metrics_for_all_repos,
