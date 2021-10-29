@@ -25,15 +25,6 @@ class FileExistenceCheck:
     file_contents: Optional[Union[ContentFile, List[ContentFile]]] = None
 
 
-def is_github_authenticated(gh: Github) -> bool:
-    """Use private class attributes to check if authenticated to github."""
-    if not gh:
-        return False
-    if gh._Github__requester._Requester__authorizationHeader:  # type: ignore
-        return True
-    return False
-
-
 def check_github_file_exists(
     gh_repo: Repository, file_path, branch_name
 ) -> FileExistenceCheck:

@@ -4,8 +4,12 @@ from github import GithubException
 from github.ContentFile import ContentFile
 from github.PullRequest import PullRequest
 from github.Repository import Repository
-from socless_repo_parser import SoclessGithubWrapper
-from socless_repo_parser.helpers import parse_repo_names, get_github_domain
+from socless_repo_parser import (
+    SoclessGithubWrapper,
+    is_github_authenticated,
+    parse_repo_names,
+    get_github_domain,
+)
 from socless_repo_parser.models import RepoMetadata
 from socless_repo_updater.constants import (
     PACKAGE_JSON,
@@ -24,7 +28,6 @@ from socless_repo_updater.file_types.serverless_yml import (
 )
 from socless_repo_updater.utils import (
     commit_file_with_pr,
-    is_github_authenticated,
     make_branch_name,
     validate_socless_python_release,
 )
