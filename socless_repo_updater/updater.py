@@ -24,6 +24,7 @@ from socless_repo_updater.file_types.serverless_yml import (
 )
 from socless_repo_updater.utils import (
     commit_file_with_pr,
+    is_github_authenticated,
     make_branch_name,
     validate_socless_python_release,
 )
@@ -201,6 +202,10 @@ class SoclessUpdater(SoclessGithubWrapper):
                 gh = self.get_or_init_github(required=True)
 
             try:
+                if not is_github_authenticated(gh):
+                    raise UpdaterError(
+                        f"Stopping update, github instance for {repo_meta.url} is not authenticated."
+                    )
                 gh_repo = gh.get_repo(repo_meta.get_full_name())
 
                 repo_updater = RepoUpdater(gh_repo, head_branch)
