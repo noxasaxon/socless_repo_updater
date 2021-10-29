@@ -12,7 +12,7 @@ from socless_repo_updater.constants import (
     REQUIREMENTS_FULL_PATH,
     SERVERLESS_YML,
 )
-from socless_repo_updater.exceptions import UpdaterError, VersionUpdateException
+from socless_repo_updater.exceptions import UpdaterError
 from socless_repo_updater.file_types.package_json import update_package_json_contents
 from socless_repo_updater.file_types.requirements_txt import (
     requirements_txt_are_equal,
@@ -25,10 +25,11 @@ from socless_repo_updater.file_types.serverless_yml import (
 from socless_repo_updater.utils import (
     commit_file_with_pr,
     make_branch_name,
+    validate_socless_python_release,
 )
 
 
-class GithubUpdater:
+class RepoUpdater:
     def __init__(self, gh_repo: Repository, head_branch: str = "") -> None:
         self.gh_repo = gh_repo
         self.head_branch = head_branch or make_branch_name()
@@ -46,9 +47,9 @@ class GithubUpdater:
     def _create_head_branch_if_nonexistent(self):
         try:
             _ = self.gh_repo.get_branch(self.head_branch)
-        except GithubException as e:
+        except GithubException:
             print(
-                f"Branch {self.head_branch} does not exist on {self.gh_repo.name}. Creating.. ({e})"
+                f"Branch {self.head_branch} does not exist on {self.gh_repo.name}. Creating.."
             )
             gh_source = self.gh_repo.get_branch(self.default_branch)
             self.gh_repo.create_git_ref(
@@ -181,18 +182,17 @@ class SoclessUpdater(SoclessGithubWrapper):
         self.get_or_init_github_enterprise(token, domain)
         ghe_domain = get_github_domain(self.github_enterprise)  # type: ignore
 
-        # TODO validate args to update _before_ starting the batch
-        # if socless_python_version:
-        #     socless_python_version = validate_socless_python_release(
-        #         socless_python_version
-        #     )
-
-        # update each repo
+        # validate args to update _before_ starting the batch
+        if socless_python_version:
+            socless_python_version = validate_socless_python_release(
+                self.get_or_init_github(), socless_python_version
+            )
 
         repos_metadata = parse_repo_names(cli_repo_input=repo_list)
         repos_metadata.sort(key=lambda x: x.url)
         self.all_repos = repos_metadata
 
+        # update each repo
         for repo_meta in repos_metadata:
             # select correct github instance
             if ghe_domain in repo_meta.url:
@@ -203,7 +203,7 @@ class SoclessUpdater(SoclessGithubWrapper):
             try:
                 gh_repo = gh.get_repo(repo_meta.get_full_name())
 
-                repo_updater = GithubUpdater(gh_repo, head_branch)
+                repo_updater = RepoUpdater(gh_repo, head_branch)
                 repo_updater.update_in_github(
                     pj_deps,
                     pj_replace_only,
@@ -235,9 +235,9 @@ class SoclessUpdater(SoclessGithubWrapper):
     ):
         # TODO validate args to update _before_ starting the batch
         # if socless_python_version:
-        #     socless_python_version = validate_socless_python_release(
-        #         socless_python_version
-        #     )
+        # socless_python_version = validate_socless_python_release(
+        #     socless_python_version
+        # )
 
         # update each repo
 
@@ -251,7 +251,7 @@ class SoclessUpdater(SoclessGithubWrapper):
             try:
                 gh_repo = gh.get_repo(repo_meta.get_full_name())
 
-                repo_updater = GithubUpdater(gh_repo, head_branch)
+                repo_updater = RepoUpdater(gh_repo, head_branch)
                 repo_updater.update_in_github(
                     pj_deps,
                     pj_replace_only,
@@ -270,28 +270,6 @@ class SoclessUpdater(SoclessGithubWrapper):
                 self.errors.append((repo_meta, e))
 
         self.report_all_metrics()
-
-    def validate_socless_python_release(self, release_tag_or_latest: str) -> str:
-        if release_tag_or_latest == "latest":
-            open_source_github = self.get_or_init_github()
-            socless_python_repo = open_source_github.get_repo(
-                "twilio-labs/socless_python"
-            )
-            release = socless_python_repo.get_latest_release().tag_name
-            return release
-        elif not release_tag_or_latest:
-            raise VersionUpdateException("No version specified for socless_python")
-        # elif not check_release_exists(
-        #     repo="socless_python",
-        #     org="twilio-labs",
-        #     release=release_tag_or_latest,
-        #     ghe=False,
-        # ):
-        #     raise VersionUpdateException(
-        #         f"Release {release_tag_or_latest} not found for twilio-labs/socless_python"
-        #     )
-
-        return release_tag_or_latest
 
     def report_all_metrics(self):
         # # report metrics

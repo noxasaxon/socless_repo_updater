@@ -1,13 +1,13 @@
 import uuid
 import collections.abc
+from dataclasses import dataclass
 from typing import List, Optional, Union
+from github import Github, GithubException
 from github.PullRequest import PullRequest
 from github.Repository import Repository
-from github import GithubException
 from github.ContentFile import ContentFile
-from dataclasses import dataclass
 
-from socless_repo_updater.exceptions import UpdaterError
+from socless_repo_updater.exceptions import UpdaterError, VersionUpdateException
 
 
 def make_branch_name(name=""):
@@ -23,6 +23,15 @@ class FileExistenceCheck:
     branch_exists: bool = False
     file_exists: bool = False
     file_contents: Optional[Union[ContentFile, List[ContentFile]]] = None
+
+
+def is_github_authenticated(gh: Github) -> bool:
+    """Use private class attributes to check if authenticated to github."""
+    if not gh:
+        return False
+    if gh._Github__requester._Requester__authorizationHeader:  # type: ignore
+        return True
+    return False
 
 
 def check_github_file_exists(
@@ -143,6 +152,30 @@ def dict_merge(*args, add_keys=True):
             else:
                 rtn_dct[k] = v
     return rtn_dct
+
+
+def validate_socless_python_release(
+    public_gh: Github, release_tag_or_latest: str
+) -> str:
+    if release_tag_or_latest == "latest":
+        socless_python_repo = public_gh.get_repo("twilio-labs/socless_python")
+        release = socless_python_repo.get_latest_release().tag_name
+        return release
+    elif not release_tag_or_latest:
+        raise VersionUpdateException(
+            "No version tag or 'latest' specified for socless_python"
+        )
+    # elif not check_release_exists(
+    #     repo="socless_python",
+    #     org="twilio-labs",
+    #     release=release_tag_or_latest,
+    #     ghe=False,
+    # ):
+    #     raise VersionUpdateException(
+    #         f"Release {release_tag_or_latest} not found for twilio-labs/socless_python"
+    #     )
+
+    return release_tag_or_latest
 
 
 # def check_release_exists(repo: str, org: str, release: str, ghe=False):
